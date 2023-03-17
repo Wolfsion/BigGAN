@@ -1,5 +1,4 @@
 import os
-
 import torch.nn as nn
 from torch import optim
 from torch.nn.utils import spectral_norm
@@ -142,10 +141,10 @@ class GenBlock(nn.Module):
 
 # 生成网络 输入inputs.shape = tensor.size[(batch_size, 80)]
 class Generator(nn.Module):
-    def __init__(self):
+    def __init__(self, classes: int):
         super(Generator, self).__init__()
         self.linear0 = snlinear(in_features=20, out_features=6144, bias=True)
-        self.shared = nn.Embedding(10, 128)
+        self.shared = nn.Embedding(classes, 128)
         # 主要块
         self.blocks = nn.ModuleList()
         self.blocks.append(nn.ModuleList([GenBlock()]))  # (0): ModuleList
@@ -201,21 +200,22 @@ def weights_init(m):
     classname = m.__class__.__name__
     if classname.find('Conv') != -1:
         m.weight.data.normal_(0.0, 0.02)
-    elif classname.find('BatchNorm') != -1:
-        m.weight.data.normal_(1.0, 0.02)
-        m.bias.data.fill_(0)
+    elif classname == 'BatchNorm2d':
+        if m.affine:
+            m.weight.data.normal_(1.0, 0.02)
+            m.bias.data.fill_(0)
 
 
-def train_model(dataloader, classes: int, batch_size: int = 128):
+def train_model(dataloader, classes: int):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    netG = Generator().to(device)
+    netG = Generator(classes).cuda(0)
     netG.apply(weights_init)
     # load weights to test the model
     # netG.load_state_dict(torch.load('weights/netG_epoch_24.pth'))
     print(netG)
 
-    netD = Discriminator().to(device)
+    netD = Discriminator(n_classes=classes).cuda(0)
     netD.apply(weights_init)
     # load weights to test the model
     # netD.load_state_dict(torch.load('weights/netD_epoch_24.pth'))
@@ -241,24 +241,28 @@ def train_model(dataloader, classes: int, batch_size: int = 128):
             ###########################
             # train with real
             netD.zero_grad()
-            real_cpu = data[0].to(device)
+            real_cpu = data[0].cuda(0)
+            real_target = data[1].cuda(0)
             batch_size = real_cpu.size(0)
-            label = torch.full((batch_size,), real_label, device=device).float()
+            label = torch.full((batch_size,), real_label).float().cuda(0)
 
-            output = netD(real_cpu)
+            output = netD(real_cpu, real_target)
             errD_real = criterion(output, label)
+
             errD_real.backward()
             D_x = output.mean().item()
 
             # train with fake
-            fixed_noise = torch.tensor(np.random.RandomState(2022).randn(batch_size, 80)).to(torch.float32).to(device)
-            label = torch.randint(low=0, high=classes, size=(batch_size,), dtype=torch.long).to(device)
+            fixed_noise = torch.tensor(np.random.RandomState(2022).randn(batch_size, 80)).to(torch.float32).cuda(0)
+            label = torch.randint(low=0, high=classes, size=(batch_size,), dtype=torch.long).cuda(0)
 
             fake = netG(fixed_noise, label)
-            label.fill_(fake_label).float()
-            output = netD(fake.detach())
+            label.fill_(fake_label).float().cuda(0)
+
+            output = netD(fake.detach(), label)
             errD_fake = criterion(output, label)
             errD_fake.backward()
+
             D_G_z1 = output.mean().item()
             errD = errD_real + errD_fake
             optimizerD.step()
@@ -297,26 +301,26 @@ def create_imgs(path: str, imgs_cnt: int, label_idx: int):
     batch = 128
 
     # 以下两行需要根据自己的模型以及模型参数路径进行修改
-    G = Generator().to(device)
+    G = Generator().cuda(0)
     G.load_state_dict(torch.load("./model.pth", map_location=device)["state_dict"])
     G.eval()
 
-    for idx in range(imgs_cnt//batch):
-        z = torch.tensor(np.random.RandomState(2022).randn(batch, 80)).to(torch.float32).to(device)
-        label = torch.zeros(batch).type(torch.long).to(device) + label_idx
+    for idx in range(imgs_cnt // batch):
+        z = torch.tensor(np.random.RandomState(2022).randn(batch, 80)).to(torch.float32).cuda(0)
+        label = torch.zeros(batch).type(torch.long).cuda(0) + label_idx
         img = G(z, label)
 
         for j in range(batch):
             img_path = os.path.join(path, f"{label_idx}-{idx}-{j}.png")
-            vutils.save_image(img.detach()[j:j+1], img_path, normalize=True)
+            vutils.save_image(img.detach()[j:j + 1], img_path, normalize=True)
 
 
 if __name__ == '__main__':
-    batch_size = 128
+    batch_size = 32
     num_classes = 100
     dataloader = get_data_loader(VDataSet.CIFAR100, data_type="train",
                                  batch_size=batch_size, shuffle=True)
-    train_model(dataloader, classes=num_classes, batch_size=batch_size)
+    train_model(dataloader, classes=num_classes)
 
     # # 生成数据集
     # base_path = "/home/xd/la/datasets/CIFAR10-GAN"
@@ -326,5 +330,3 @@ if __name__ == '__main__':
     # for i in range(num_classes):
     #     create_imgs(os.path.join(base_path, str(i)), cnt_imgs, i)
     #     print(f"{i} class create done.")
-
-
