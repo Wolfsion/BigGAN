@@ -10,6 +10,9 @@ import numpy as np
 from matplotlib import pyplot as plt
 import torchvision.utils as vutils
 
+from DataLoader import get_data_loader, VDataSet
+from Discriminator import Discriminator
+
 
 # 定义归一化函数
 def batchnorm_2d(in_features, eps=1e-4, momentum=0.1, affine=True):
@@ -186,14 +189,6 @@ class Generator(nn.Module):
         return out
 
 
-class Discriminator(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, x):
-        pass
-
-
 def imshow(imgs):
     imgs = imgs / 2 + 0.5  # 逆归一化，像素值从[-1, 1]回到[0, 1]
     imgs = imgs.cpu().detach().numpy().transpose((1, 2, 0))  # 图像从(C, H, W)转回(H, W, C)的numpy矩阵
@@ -317,12 +312,19 @@ def create_imgs(path: str, imgs_cnt: int, label_idx: int):
 
 
 if __name__ == '__main__':
-    base_path = "/home/xd/la/datasets/CIFAR10-GAN"
-    num_classes = 10
-    cnt_imgs = 5120
+    batch_size = 128
+    num_classes = 100
+    dataloader = get_data_loader(VDataSet.CIFAR100, data_type="train",
+                                 batch_size=batch_size, shuffle=True)
+    train_model(dataloader, classes=num_classes, batch_size=batch_size)
 
-    for i in range(num_classes):
-        create_imgs(os.path.join(base_path, str(i)), cnt_imgs, i)
-        print(f"{i} class create done.")
+    # # 生成数据集
+    # base_path = "/home/xd/la/datasets/CIFAR10-GAN"
+    # num_classes = 10
+    # cnt_imgs = 5120
+    #
+    # for i in range(num_classes):
+    #     create_imgs(os.path.join(base_path, str(i)), cnt_imgs, i)
+    #     print(f"{i} class create done.")
 
 
